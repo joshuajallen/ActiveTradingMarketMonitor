@@ -1,0 +1,1251 @@
+---
+title: "Active Market Monitor"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  flexdashboard::flex_dashboard:
+    vertical_layout: scroll
+    theme: lumen
+    orientation: rows
+    css: style.css
+---
+
+<style>
+
+.navbar-brand {
+  display: grid;
+  margin: auto;
+  padding: 5px;
+}
+
+.navbar-author {
+  margin-left: 0px;
+}
+</style>
+
+```{r setup, include=FALSE}
+
+#-----------------------------------------------------------------------
+## FILE        : UI.R - USER INTERFACE             DATE : 19/08/2020
+##
+## CREATED BY  : Joshua Allen
+##
+## DESCRIPTION : Market monitor for US, CAD, EUR, YEN, AUS portfolios, including: 
+##               yield and asset swap curves, carry/roll profiles of 
+##               and more details view of the investment opportunity set 
+##
+## INPUTS      : start_date, end_date, REPO rates, MATURITY buckets 
+
+# set config  -------------------------------------------------------
+
+# source environment files
+source("\\\\istdba/BuildArchive/ShinyApps/EnvironmentScript/EnvironmentScript_Latest/LOCAL/Artifactory/environment.R")
+
+#set base directories
+database_filename <- file.path("N:/Offdata/RM/_Data/ListManagement/list_membership.db")
+
+# boe checkpoint
+checkpoint_date <- "2022-01-01"
+message(paste0("checkpoint_date: ", checkpoint_date))
+boeCheckpoint(checkpoint_date, scanForPackages = FALSE)
+
+# load packages -----------------------------------------------------
+
+library(data.table)
+library(DT)
+library(lubridate)
+library(tidyverse)
+library(readr)
+library(RSQLite)
+library(jrvFinance)
+library(sparkline)
+library(formattable)
+library(Rblpapi)
+library(httr)
+library(zoo)
+library(flexdashboard)
+library(ggplot2)
+library(janitor)
+library(plotly)
+library(magrittr)
+library(timeDate)
+
+options(digits = 2)
+options(DT.fillContainer = T)
+options(scipen = 999)
+
+# Load a library so that boeCheckpoint won't complain about it being missing
+FIRVr_str <- "library(FIRVr, lib.loc = 'N:/Offdata/RM/_R code repository/RMPackages/_R4.0')"
+eval(parse(text=FIRVr_str))
+
+
+# souce functions ---------------------------------------------------------
+
+source(file.path("../functions/functions.R"))
+source(file.path("../config/config.R"))
+
+# set paramters -------------------------------------------------------
+
+# 1. set start/end dates in the format YYYY-MM-DD
+start_date =  Sys.Date() - 1.5*360 # start date - default today - 270 days, need this for vol adjusted C+R (times series calc with 2m look back period)
+end_date = Sys.Date() # end date - default today
+DATE_START <- as.Date(start_date, "%d-%m-%Y")
+DATE_END <-  as.Date(end_date, "%d-%m-%Y")
+
+#2. set MATURITY buckets
+Buckets = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 40)
+
+# choose benchmark securities for each ortfolio, for carry/roll calculations
+BENCHMARK_SECURITY_CAD = "CAN"
+BENCHMARK_SECURITY_USD = "T"
+BENCHMARK_SECURITY_EUR = "DE"
+BENCHMARK_SECURITY_AUD = "ACGB"
+BENCHMARK_SECURITY_JPY = "JGB"
+
+# read in config file with defined lists 
+
+config <- readr::read_csv(file = "../data/bond_lists.csv", show_col_types = FALSE)
+provie_tickers <- config$PROVIES[!is.na(config$PROVIES)]  
+aussie_tickers <- config$AUSSIE_STATES[!is.na(config$AUSSIE_STATES)] 
+govie_tickers <- config$GOVIE_TICKERS[!is.na(config$GOVIE_TICKERS)]  
+currencies <- config$CURRENCIES[!is.na(config$CURRENCIES)]  
+bond_lists <- config$BOND_LISTS[!is.na(config$BOND_LISTS)]  
+
+# source modules for report ----------------------------------------------
+source("../modules/GET_DATA.R")
+source("../modules/CARRY_ROLL.R")
+
+```
+
+<script>
+$(document).ready(function(){
+    $('[data-toggle="popover"]').popover(); 
+});
+</script>
+
+Canada Curves {data-icon="fa-copyright"}
+=====================================  
+
+Row {data-height=500}
+-------------------------------------
+
+### Canada Curves
+
+```{r CAD_CURVES, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "CAD", grouping = "TICKER")
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YLD_YTM_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Canada Asset Swap Curves (CDOR)
+
+```{r CAD_ASSET_SWAP, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "CAD", grouping = "TICKER")
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "ASSET_SWAP_SPD_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Canada Spread to Government Curves
+
+```{r CAD_GOV_SPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "CAD", grouping = "TICKER")
+
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ISPREAD_TO_GOVT",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Canada Z-Spread ASW (CDOR)
+
+```{r CAD_Z_SPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "CAD", grouping = "TICKER")
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ISPREAD_TO_GOVT",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Canada C/R {data-icon="ion-android-refresh"}
+=====================================  
+
+Row {data-height= 750}
+-------------------------------------
+
+### Carry & Roll
+
+```{r CAD_CarryRollPlot, out.width= "95%", out.height= "95%"}
+
+p <-
+  ScatterChart(cad_carry_roll,
+               fill = "TICKER",
+               xlab = "MATURITY",
+               ylab = "CARRY_ROLL_12M") +
+  ggplot2::geom_smooth(
+    ggplot2::aes(
+      x = MATURITY,
+      y = CARRY_ROLL_12M,
+      group = TICKER,
+      colour = TICKER
+    ),
+    size = 0.2,
+    method = "lm",
+    se = F,
+    formula = y ~ poly(x, 2, raw = TRUE)
+  ) + ggplot2::theme(legend.title = element_blank())
+
+plotly::ggplotly(p) %>%
+  plotly_layout()
+
+```
+
+### By Issuer
+
+```{r CAD_CarryRollProvince, out.width= "95%", out.height= "95%"}
+
+data <- cad_carry_roll %>% 
+  dplyr::group_by(TICKER, BUCKET) %>%
+  dplyr::summarise(CARRY_ROLL_12M = mean(CARRY_ROLL_12M, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+p <-
+  barChart(
+    data,
+    xlab = "BUCKET",
+    ylab = "CARRY_ROLL_12M",
+    fill = "TICKER",
+    position = "dodge"
+  ) +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+### Component Contribution
+
+```{r CAD_CarryRollContribution, out.width= "95%", out.height= "95%"}
+
+data <- cad_carry_roll %>%
+  dplyr::select(TICKER,  BUCKET,ROLL_1Y, CARRY_1Y) %>%
+  tidyr::gather(key = Component, value = Value, -TICKER, -BUCKET) %>% 
+  dplyr::group_by(TICKER, BUCKET, Component) %>% 
+  dplyr::summarise(Value = mean(Value, na.rm = TRUE)) %>% 
+  dplyr::ungroup() 
+
+p <-
+  barChart(data,
+           xlab = "BUCKET",
+           ylab = "Value",
+           fill = "Component") + 
+  ggplot2::facet_wrap( ~ TICKER)  +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+Row {data-height= 550}
+-------------------------------------
+
+```{r CAD_CarryRoll, out.width= "100%", out.height= "100%"}
+
+df <- cad_carry_roll %>%
+  dplyr::select(
+    TICKER,
+    CRNCY,
+    ID_BB_SEC_NUM_DES,
+    ISSUE_DT,
+    MATURITY_YEARS,
+    DURATION,
+    YLD_YTM_MID,
+    ASSET_SWAP_SPD_MID,
+    Done,
+    CARRY12M,
+    ROLL_12M,
+    CARRY_ROLL_12M
+  ) %>%
+  dplyr::rename("SECURITY" = "ID_BB_SEC_NUM_DES") %>% 
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  tidyr::drop_na(CARRY12M, ROLL_12M, CARRY_ROLL_12M)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+create_data_table(
+  df,
+  row_group_index = 0
+) %>% formatRound(ism, digits = 2) %>% 
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%#
+  formatStyle('ROLL_12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+
+
+US Curves {data-icon="fa-copyright"}
+=====================================  
+
+Row {data-height=500}
+-------------------------------------
+
+### US Treasury Curve
+
+```{r UST_CURVE, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "USD", grouping = "TICKER") %>% 
+  dplyr::filter(TICKER %in% c("T", "B", "CMB"))
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YLD_YTM_MID",
+  fill = "YRS_TO_MTY_ISSUE",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### US ASW Curve (SOFR)
+
+```{r UST_ASW, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "USD", grouping = "TICKER") %>% 
+  dplyr::filter(TICKER %in% c("T", "B", "CMB"))
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "ASSET_SWAP_SPD_MID",
+  fill = "YRS_TO_MTY_ISSUE",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### US Z-Spread ASW (SOFR)
+
+```{r USA_ZSPREAD, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "USD", grouping = "TICKER") %>% 
+  dplyr::filter(TICKER %in% c("T", "B", "CMB"))
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ZSPREAD",
+  fill = "YRS_TO_MTY_ISSUE",
+  polynomial_order = 3
+)
+```
+
+Row {data-height=1200}
+-------------------------------------
+
+### US SSA Asset Swap Curves (SOFR)
+
+```{r USA_ASW_CURVES, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+data <-
+  all_securities %>% 
+  dplyr:: mutate(ASSET_SWAP_SPD_MID = ASSET_SWAP_SPD_MID/100) %>% 
+  dplyr:: filter(CRNCY == "USD", 
+                 YLD_YTM_MID > 0,
+                 MATURITY < Sys.Date() + 12 * 365, 
+                 !TICKER %in% c("T", "B", "CMB")) %>% 
+  tidyr::drop_na(ASSET_SWAP_SPD_MID)
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "USD", grouping = "TICKER") %>% 
+  dplyr::filter(TICKER %in% c("T", "B", "CMB"), 
+                MATURITY < Sys.Date() + 12 * 365) %>% 
+  dplyr::rename("UST" = "TICKER") 
+
+
+p <-
+  plot_yield_curve_facets(
+    data = data,
+    data_facet = plot_data,
+    xlab = "MATURITY",
+    ylab = "ASSET_SWAP_SPD_MID",
+    fill = "TICKER",
+    fill_facet = "UST"
+  ) +
+  ggplot2::labs(x = NULL) + 
+  ggplot2::facet_wrap( ~ TICKER, scales = "free", ncol = 3)
+
+plotly::ggplotly(p)
+
+```
+
+US C/R {data-icon="ion-android-refresh"}
+=====================================  
+
+Row {data-height= 750}
+-------------------------------------
+
+### Carry & Roll
+
+```{r US_CarryRollPlot, out.width= "95%", out.height= "95%"}
+
+p <-
+  ScatterChart(usa_carry_roll,
+               fill = "TICKER",
+               xlab = "MATURITY",
+               ylab = "CARRY_ROLL_12M") +
+  ggplot2::geom_smooth(
+    ggplot2::aes(
+      x = MATURITY,
+      y = CARRY_ROLL_12M,
+      group = TICKER,
+      colour = TICKER
+    ),
+    size = 0.2,
+    method = "lm",
+    se = F,
+    formula = y ~ poly(x, 2, raw = TRUE)
+  ) + ggplot2::theme(legend.title = element_blank())
+
+plotly::ggplotly(p) %>%
+  plotly_layout()
+
+```
+
+### By Issuer
+
+```{r US_CarryRollBar, out.width= "95%", out.height= "95%"}
+
+data <- usa_carry_roll %>% 
+  dplyr::group_by(TICKER, BUCKET) %>%
+  dplyr::summarise(CARRY_ROLL_12M = mean(CARRY_ROLL_12M, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+p <-
+  barChart(
+    data,
+    xlab = "BUCKET",
+    ylab = "CARRY_ROLL_12M",
+    fill = "TICKER",
+    position = "dodge"
+  ) +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+### Component Contribution
+
+```{r US_CarryRollContribution, out.width= "95%", out.height= "95%"}
+
+data <- usa_carry_roll %>%
+  dplyr::select(TICKER,  BUCKET,ROLL_1Y, CARRY_1Y) %>%
+  tidyr::gather(key = Component, value = Value, -TICKER, -BUCKET) %>% 
+  dplyr::group_by(TICKER, BUCKET, Component) %>% 
+  dplyr::summarise(Value = mean(Value, na.rm = TRUE)) %>% 
+  dplyr::ungroup() 
+
+p <-
+  barChart(data,
+           xlab = "BUCKET",
+           ylab = "Value",
+           fill = "Component") + 
+  ggplot2::facet_wrap( ~ TICKER)  +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+Row {data-height= 550}
+-------------------------------------
+
+```{r US_CarryRoll, out.width= "95%", out.height= "95%"}
+
+df <- usa_carry_roll %>% 
+  dplyr::select(
+    TICKER,
+    CRNCY,
+    ID_BB_SEC_NUM_DES,
+    ISSUE_DT,
+    MATURITY_YEARS,
+    DURATION,
+    YLD_YTM_MID,
+    ASSET_SWAP_SPD_MID,
+    Done,
+    CARRY12M,
+    ROLL_12M,
+    CARRY_ROLL_12M
+  ) %>%
+  dplyr::rename("SECURITY" = "ID_BB_SEC_NUM_DES") %>% 
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  tidyr::drop_na(CARRY12M, ROLL_12M, CARRY_ROLL_12M)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+create_data_table(
+  df,
+  row_group_index = 0
+) %>% formatRound(ism, digits = 2) %>% 
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%#
+  formatStyle('ROLL_12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+
+Euro Curves {data-icon="fa-copyright"}
+=====================================  
+
+Row {data-height=500}
+-------------------------------------
+
+### Euro Govie Curves
+
+```{r EUR_CURVES, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "EUR", grouping = "TICKER") %>% 
+  dplyr::filter(!TICKER %in% provie_tickers)
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YLD_YTM_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Euro Asset Swap Curves (ESTR)
+
+```{r EURO_ASSET_SWAP, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "EUR", grouping = "TICKER") %>% 
+  dplyr::filter(!TICKER %in% provie_tickers)
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_O_SPREAD",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Euro Spread to Government Curves
+
+```{r EUR_GOV_SPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "EUR", grouping = "TICKER") %>% 
+  dplyr::filter(!TICKER %in% provie_tickers)
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ISPREAD_TO_GOVT",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Euro Z-Spread ASW (EURIBOR)
+
+```{r EURO_ASW_ZSPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "EUR", grouping = "TICKER") %>% 
+  dplyr::filter(!TICKER %in% provie_tickers)
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "ASSET_SWAP_SPD_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+
+Row {data-height=850}
+-------------------------------------
+
+### Euro SSA Asset Swap Curves (ESTR)
+
+```{r EUR_SSA_CURVES, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+data <-
+  all_securities %>% 
+  dplyr:: mutate(ASSET_SWAP_SPD_MID = ASSET_SWAP_SPD_MID/100) %>% 
+  dplyr:: filter(CRNCY == "EUR", 
+                 YLD_YTM_MID > 0,
+                 MATURITY < Sys.Date() + 12 * 365, 
+                 !TICKER %in% c(govie_tickers), 
+                 !grepl(pattern = "TB", x = TICKER, ignore.case = T)) %>% 
+  tidyr::drop_na(ASSET_SWAP_SPD_MID)
+
+plot_data <- get_govie_data(data = government_bonds, CURRENCY = "EUR", grouping = "TICKER") %>% 
+  dplyr::filter(TICKER %in% "DE",
+                MATURITY < Sys.Date() + 12 * 365) %>% 
+  dplyr::rename("DU" = "TICKER") 
+
+p <-
+  plot_yield_curve_facets(
+    data = data,
+    data_facet = plot_data,
+    xlab = "MATURITY",
+    ylab = "YAS_O_SPREAD",
+    fill = "TICKER",
+    fill_facet = "DU"
+  ) +
+  ggplot2::labs(x = NULL) + 
+  ggplot2::facet_wrap( ~ TICKER, scales = "free", ncol = 3)
+
+plotly::ggplotly(p)
+
+```
+
+Euro C/R {data-icon="ion-android-refresh"}
+=====================================  
+
+Row {data-height= 750}
+-------------------------------------
+
+### Carry & Roll
+
+```{r Eur_CarryRollPlot, out.width= "95%", out.height= "95%"}
+
+p <-
+  ScatterChart(eur_carry_roll,
+               fill = "TICKER",
+               xlab = "MATURITY",
+               ylab = "CARRY_ROLL_12M") +
+  ggplot2::geom_smooth(
+    ggplot2::aes(
+      x = MATURITY,
+      y = CARRY_ROLL_12M,
+      group = TICKER,
+      colour = TICKER
+    ),
+    size = 0.2,
+    method = "lm",
+    se = F,
+    formula = y ~ poly(x, 2, raw = TRUE)
+  ) + ggplot2::theme(legend.title = element_blank())
+
+plotly::ggplotly(p) %>%
+  plotly_layout()
+
+```
+
+### By Issuer
+
+```{r EUR_CarryRollBar, out.width= "95%", out.height= "95%"}
+
+data <- eur_carry_roll %>% 
+  dplyr::group_by(TICKER, BUCKET) %>%
+  dplyr::summarise(CARRY_ROLL_12M = mean(CARRY_ROLL_12M, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+p <-
+  barChart(
+    data,
+    xlab = "BUCKET",
+    ylab = "CARRY_ROLL_12M",
+    fill = "TICKER",
+    position = "dodge"
+  ) +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+### Component Contribution
+
+```{r EUR_CarryRollContribution, out.width= "95%", out.height= "95%"}
+
+data <- eur_carry_roll %>%
+  dplyr::select(TICKER,  BUCKET,ROLL_1Y, CARRY_1Y) %>%
+  tidyr::gather(key = Component, value = Value, -TICKER, -BUCKET) %>% 
+  dplyr::group_by(TICKER, BUCKET, Component) %>% 
+  dplyr::summarise(Value = mean(Value, na.rm = TRUE)) %>% 
+  dplyr::ungroup() 
+
+p <-
+  barChart(data,
+           xlab = "BUCKET",
+           ylab = "Value",
+           fill = "Component") + 
+  ggplot2::facet_wrap( ~ TICKER)  +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+Row {data-height= 550}
+-------------------------------------
+
+```{r EUR_CarryRoll, out.width= "95%", out.height= "95%"}
+
+df <- eur_carry_roll %>%
+    dplyr::select(
+    TICKER,
+    CRNCY,
+    ID_BB_SEC_NUM_DES,
+    ISSUE_DT,
+    MATURITY_YEARS,
+    DURATION,
+    YLD_YTM_MID,
+    ASSET_SWAP_SPD_MID,
+    Done,
+    CARRY12M,
+    ROLL_12M,
+    CARRY_ROLL_12M
+  ) %>%
+  dplyr::rename("SECURITY" = "ID_BB_SEC_NUM_DES") %>% 
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  tidyr::drop_na(CARRY12M, ROLL_12M, CARRY_ROLL_12M)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+create_data_table(
+  df,
+  row_group_index = 0
+) %>% formatRound(ism, digits = 2) %>% 
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%#
+  formatStyle('ROLL_12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+Aussie Curves {data-icon="fa-copyright"}
+=====================================  
+
+Row {data-height=500}
+-------------------------------------
+
+### Aussie Govie Curves
+
+```{r AUS_CURVES, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = all_securities %>% dplyr::filter(CRNCY %in% "AUD", TICKER %in% c(aussie_tickers, govie_tickers)),
+    CURRENCY = "AUD",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YLD_YTM_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Aussie Asset Swap Curves (BBSW3M)
+
+```{r AUD_ASSET_SWAP, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = all_securities %>% dplyr::filter(CRNCY %in% "AUD", TICKER %in% c(aussie_tickers, govie_tickers)),
+    CURRENCY = "AUD",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "ASSET_SWAP_SPD_MID",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Aussie Z-Spread Asset Swap Curves (BBSW3M)
+
+```{r AUD_ASSET_ZSPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = all_securities %>% dplyr::filter(CRNCY %in% "AUD", TICKER %in% c(aussie_tickers, govie_tickers)),
+    CURRENCY = "AUD",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ZSPREAD",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Aussie Spread to Government Curves
+
+```{r AUS_GOV_SPREAD, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = all_securities %>% dplyr::filter(CRNCY %in% "AUD", TICKER %in% c(aussie_tickers, govie_tickers)),
+    CURRENCY = "AUD",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ISPREAD_TO_GOVT",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+
+```
+
+
+Row {data-height=600}
+-------------------------------------
+
+### Aussie SSA Asset Swap Curves (BBSW3M)
+
+```{r AUD_SSA_CURVES, out.width= "95%", out.height= "95%", warning=F, echo=F}
+
+data <-
+  all_securities %>%
+  dplyr::mutate(ASSET_SWAP_SPD_MID = ASSET_SWAP_SPD_MID / 100) %>%
+  dplyr::filter(
+    CRNCY == "AUD",
+    !TICKER %in% c(aussie_tickers, provie_tickers, "ACGB"),
+    MATURITY < Sys.Date() + 12 * 365,
+    !grepl(pattern = "TB", x = TICKER,ignore.case = T
+    )
+  ) %>%
+  tidyr::drop_na(ASSET_SWAP_SPD_MID)
+
+plot_data <-
+  get_govie_data(data = government_bonds,
+                 CURRENCY = "AUD",
+                 grouping = "TICKER") %>%
+  dplyr::filter(TICKER %in% "ACGB",
+                MATURITY < Sys.Date() + 12 * 365) %>%
+  dplyr::rename("ACGB" = "TICKER") 
+
+p <-
+  plot_yield_curve_facets(
+    data = data,
+    data_facet = plot_data,
+    xlab = "MATURITY",
+    ylab = "ASSET_SWAP_SPD_MID",
+    fill = "TICKER",
+    fill_facet = "ACGB"
+  ) +
+  ggplot2::labs(x = NULL) + 
+  ggplot2::facet_wrap( ~ TICKER, scales = "free", ncol = 3)
+
+plotly::ggplotly(p)
+
+```
+
+
+
+Aussie C/R {data-icon="ion-android-refresh"}
+=====================================  
+
+Row {data-height= 750}
+-------------------------------------
+
+### Carry & Roll
+
+```{r AUD_CarryRollPlot, out.width= "95%", out.height= "95%"}
+
+p <-
+  ScatterChart(aud_carry_roll,
+               fill = "TICKER",
+               xlab = "MATURITY",
+               ylab = "CARRY_ROLL_12M") +
+  ggplot2::geom_smooth(
+    ggplot2::aes(
+      x = MATURITY,
+      y = CARRY_ROLL_12M,
+      group = TICKER,
+      colour = TICKER
+    ),
+    size = 0.2,
+    method = "lm",
+    se = F,
+    formula = y ~ poly(x, 2, raw = TRUE)
+  ) + ggplot2::theme(legend.title = element_blank())
+
+plotly::ggplotly(p) %>%
+  plotly_layout()
+
+```
+
+### By Issuer
+
+```{r AUD_CarryRollProvince, out.width= "95%", out.height= "95%"}
+
+data <- aud_carry_roll %>% 
+  dplyr::group_by(TICKER, BUCKET) %>%
+  dplyr::summarise(CARRY_ROLL_12M = mean(CARRY_ROLL_12M, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+p <-
+  barChart(
+    data,
+    xlab = "BUCKET",
+    ylab = "CARRY_ROLL_12M",
+    fill = "TICKER",
+    position = "dodge"
+  ) +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+### Component Contribution
+
+```{r AUD_CarryRollContribution, out.width= "95%", out.height= "95%"}
+
+data <- aud_carry_roll %>%
+  dplyr::select(TICKER,  BUCKET,ROLL_1Y, CARRY_1Y) %>%
+  tidyr::gather(key = Component, value = Value, -TICKER, -BUCKET) %>% 
+  dplyr::group_by(TICKER, BUCKET, Component) %>% 
+  dplyr::summarise(Value = mean(Value, na.rm = TRUE)) %>% 
+  dplyr::ungroup() 
+
+p <-
+  barChart(data,
+           xlab = "BUCKET",
+           ylab = "Value",
+           fill = "Component") + 
+  ggplot2::facet_wrap( ~ TICKER)  +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+Row {data-height= 550}
+-------------------------------------
+
+```{r AUD_CarryRoll, out.width= "95%", out.height= "95%"}
+
+df <- aud_carry_roll %>% 
+    dplyr::select(
+    TICKER,
+    CRNCY,
+    ID_BB_SEC_NUM_DES,
+    ISSUE_DT,
+    MATURITY_YEARS,
+    DURATION,
+    YLD_YTM_MID,
+    ASSET_SWAP_SPD_MID,
+    Done,
+    CARRY12M,
+    ROLL_12M,
+    CARRY_ROLL_12M
+  ) %>%
+  dplyr::rename("SECURITY" = "ID_BB_SEC_NUM_DES") %>% 
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  tidyr::drop_na(CARRY12M, ROLL_12M, CARRY_ROLL_12M)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+create_data_table(
+  df,
+  row_group_index = 0
+) %>% formatRound(ism, digits = 2) %>% 
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%#
+  formatStyle('ROLL_12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+
+
+Japan Curves {data-icon="fa-copyright"}
+=====================================  
+
+Row {data-height=500}
+-------------------------------------
+
+### Japan Govie Curves
+
+```{r JPY_CURVES, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = government_bonds,
+    CURRENCY = "JPY",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_BOND_YLD",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Japan Asset Swap Curves (TONAR)
+
+```{r JPY_ASSET_SWAP, out.width= "95%", out.height= "95%"}
+
+plot_data <-
+  get_govie_data(
+    data = government_bonds,
+    CURRENCY = "JPY",
+    grouping = "TICKER"
+  ) 
+
+plot_yield_curve(
+  data = plot_data,
+  xlab = "MATURITY",
+  ylab = "YAS_ASW_SPREAD",
+  fill = "TICKER",
+  polynomial_order = 3
+)
+
+```
+
+Japan C/R {data-icon="ion-android-refresh"}
+=====================================  
+
+Row {data-height= 750}
+-------------------------------------
+
+### Carry & Roll
+
+```{r JPY_CarryRollPlot, out.width= "95%", out.height= "95%"}
+
+p <-
+  ScatterChart(jpy_carry_roll,
+               fill = "TICKER",
+               xlab = "MATURITY",
+               ylab = "CARRY_ROLL_12M") +
+  ggplot2::geom_smooth(
+    ggplot2::aes(
+      x = MATURITY,
+      y = CARRY_ROLL_12M,
+      group = TICKER,
+      colour = TICKER
+    ),
+    size = 0.2,
+    method = "lm",
+    se = F,
+    formula = y ~ poly(x, 2, raw = TRUE)
+  ) + ggplot2::theme(legend.title = element_blank())
+
+plotly::ggplotly(p) %>%
+  plotly_layout()
+
+```
+
+### By Issuer
+
+```{r JPY_CarryRollIssuer, out.width= "95%", out.height= "95%"}
+
+data <- jpy_carry_roll %>% 
+  dplyr::group_by(TICKER, BUCKET) %>%
+  dplyr::summarise(CARRY_ROLL_12M = mean(CARRY_ROLL_12M, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+p <-
+  barChart(
+    data,
+    xlab = "BUCKET",
+    ylab = "CARRY_ROLL_12M",
+    fill = "TICKER",
+    position = "dodge"
+  ) +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+### Component Contribution
+
+```{r JPY_CarryRollContribution, out.width= "95%", out.height= "95%"}
+
+data <- jpy_carry_roll %>%
+  dplyr::select(TICKER,  BUCKET,ROLL_12M, CARRY12M) %>%
+  tidyr::gather(key = Component, value = Value, -TICKER, -BUCKET) %>% 
+  dplyr::group_by(TICKER, BUCKET, Component) %>% 
+  dplyr::summarise(Value = mean(Value, na.rm = TRUE)) %>% 
+  dplyr::ungroup() 
+
+p <-
+  barChart(data,
+           xlab = "BUCKET",
+           ylab = "Value",
+           fill = "Component") + 
+  ggplot2::facet_wrap( ~ TICKER)  +
+  ggplot2::scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+  ggplot2:: theme(legend.title = element_blank())
+
+plotly:: ggplotly(p) %>% 
+  plotly_layout()
+
+```
+
+Row {data-height= 550}
+-------------------------------------
+
+```{r JPY_CarryRoll, out.width= "95%", out.height= "95%"}
+
+df <- jpy_carry_roll %>% 
+    dplyr::select(
+    TICKER,
+    CRNCY,
+    ID_BB_SEC_NUM_DES,
+    ISSUE_DT,
+    MATURITY_YEARS,
+    DURATION,
+    YLD_YTM_MID,
+    ASSET_SWAP_SPD_MID,
+    Done,
+    CARRY12M,
+    ROLL_12M,
+    CARRY_ROLL_12M
+  ) %>%
+  dplyr::rename("SECURITY" = "ID_BB_SEC_NUM_DES") %>% 
+  dplyr::mutate_if(is.numeric, round, 2) %>%
+  tidyr::drop_na(CARRY12M, ROLL_12M, CARRY_ROLL_12M)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+create_data_table(
+  df,
+  row_group_index = 0
+) %>% formatRound(ism, digits = 2) %>% 
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%#
+  formatStyle('ROLL_12M',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+
