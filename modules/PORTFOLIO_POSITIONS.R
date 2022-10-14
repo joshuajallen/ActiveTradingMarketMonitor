@@ -1,99 +1,4 @@
-#-----------------------------------------------------------------------
-## FILE        : UI.R - USER INTERFACE             DATE : 19/08/2020
-##
-## CREATED BY  : Joshua Allen
-##
-## DESCRIPTION : Market monitor for US, CAD, EUR, YEN, AUS portfolios, including: 
-##               yield and asset swap curves, carry/roll profiles of 
-##               and more details view of the investment opportunity set 
-##
-## INPUTS      : start_date, end_date, REPO rates, MATURITY buckets 
-
-# set config  -------------------------------------------------------
-
-# source environment files
-source("\\\\istdba/BuildArchive/ShinyApps/EnvironmentScript/EnvironmentScript_Latest/LOCAL/Artifactory/environment.R")
-
-#set base directories
-database_filename <- file.path("N:/Offdata/RM/_Data/ListManagement/list_membership.db")
-
-# boe checkpoint
-checkpoint_date <- "2022-01-01"
-message(paste0("checkpoint_date: ", checkpoint_date))
-boeCheckpoint(checkpoint_date, scanForPackages = FALSE)
-
-# load packages -----------------------------------------------------
-
-library(data.table)
-library(DT)
-library(lubridate)
-library(tidyverse)
-library(readr)
-library(RSQLite)
-library(jrvFinance)
-library(sparkline)
-library(formattable)
-library(Rblpapi)
-library(httr)
-library(zoo)
-library(flexdashboard)
-library(ggplot2)
-library(janitor)
-library(plotly)
-library(magrittr)
-library(timeDate)
-
-options(digits = 2)
-options(DT.fillContainer = T)
-options(scipen = 999)
-
-# Load a library so that boeCheckpoint won't complain about it being missing
-FIRVr_str <- "library(FIRVr, lib.loc = 'N:/Offdata/RM/_R code repository/RMPackages/_R4.0')"
-eval(parse(text=FIRVr_str))
-
-
-# souce functions ---------------------------------------------------------
-
-source(file.path("./functions/functions.R"))
-source(file.path("./config/config.R"))
-
-# set paramters -------------------------------------------------------
-
-# 1. set start/end dates in the format YYYY-MM-DD
-start_date =  Sys.Date() - 1.5*360 # start date - default today - 270 days, need this for vol adjusted C+R (times series calc with 2m look back period)
-end_date = Sys.Date() # end date - default today
-DATE_START <- as.Date(start_date, "%d-%m-%Y")
-DATE_END <-  as.Date(end_date, "%d-%m-%Y")
-
-#2. set MATURITY buckets
-Buckets = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 30, 40)
-
-# choose benchmark securities for each ortfolio, for carry/roll calculations
-BENCHMARK_SECURITY_CAD = "CAN"
-BENCHMARK_SECURITY_USD = "T"
-BENCHMARK_SECURITY_EUR = "DE"
-BENCHMARK_SECURITY_AUD = "ACGB"
-BENCHMARK_SECURITY_JPY = "JGB"
-
-# read in config file with defined lists 
-
-config <- readr::read_csv(file = "./data/bond_lists.csv", show_col_types = FALSE)
-provie_tickers <- config$PROVIES[!is.na(config$PROVIES)]  
-aussie_tickers <- config$AUSSIE_STATES[!is.na(config$AUSSIE_STATES)] 
-govie_tickers <- config$GOVIE_TICKERS[!is.na(config$GOVIE_TICKERS)]  
-currencies <- config$CURRENCIES[!is.na(config$CURRENCIES)]  
-bond_lists <- config$BOND_LISTS[!is.na(config$BOND_LISTS)]  
-
-# source modules for report ----------------------------------------------
-source("../modules/GET_DATA.R")
-source("../modules/CARRY_ROLL.R")
-
-
-
-# portfolio positions -----------------------------------------------------
-
 # set parameters -----------------------------------------------------
-#source(file.path(baseDir, "functions/functions.R"))
 DASHBOARD_ROOT <- readLines("N:/Offdata/RM/DASHBOARD_ROOT")
 config_location <- paste0(DASHBOARD_ROOT, "/../P&L Config/config") 
 pnl_location <- paste0(DASHBOARD_ROOT, "/../P&L Config/historical/")
@@ -122,8 +27,11 @@ config <-
   dplyr::rename("DEAL_TRACKING_NUM" = "Deal.No") %>% 
   dplyr::distinct()
 
+# remove NA and 0 from OL deal numbers
+deal_numbers <- unique(config$DEAL_TRACKING_NUM)[!unique(config$DEAL_TRACKING_NUM) == 0 & !is.na(unique(config$DEAL_TRACKING_NUM))]
+
 results <-
-  openlink_deal_info(OL_deal_number = unique(config$DEAL_TRACKING_NUM)) %>%
+  openlink_deal_info(OL_deal_number = deal_numbers) %>%
   dplyr::select(DEAL_TRACKING_NUM, TICKER, BUY_SELL) %>%
   dplyr::left_join(config, by = c("DEAL_TRACKING_NUM")) %>%
   tidyr::drop_na(TICKER) %>%
@@ -307,114 +215,6 @@ suppressWarnings(
     dplyr::arrange(Portfolio) %>% 
     dplyr::select(-Date)
 )
-
-df <- dplyr::filter(portfolio_table) %>%
-  dplyr::mutate(PF = Portfolio, 
-                Level1 = if_else(Level1 %in% c("Relative Value"), "RV", Level1), 
-                Level1 = if_else(Level1 %in% c("Swap Spread"), "Swaps", Level1), 
-                `CARRY VOL ADJ` = CARRY_VOL_ADJ, 
-                DURATION = DUR_ADJ_MID) %>% 
-  dplyr::select(
-    Portfolio,
-    PF, 
-    Level1,
-    Strategy,
-    CIX,
-    contains("Value"),
-    contains("Change"),
-    Stdev,
-    DURATION,
-    CARRY_1Y,
-    `CARRY VOL ADJ`,
-    `12M_PnL`,
-    `P&L ($s)`,
-    `PV01 ($s)`,
-    Timeseries,
-    `Box plot`
-  ) %>%
-  dplyr::arrange(Portfolio, Level1)
-
-ism <- df %>% lapply(class) %>% unlist == "numeric"
-
-
-DT::datatable(
-  df, 
-  extensions = c("RowGroup", "Buttons", "Scroller"),
-  filter = "top",
-  rownames = FALSE,
-  escape = FALSE,
-  selection = "none",
-  options = list(
-    scrollX = T, 
-    scrollY = "500px", 
-    dom = 't',
-    ordering = TRUE,
-    dom = "",
-    paging = FALSE,
-    rowGroup = 'Portfolio',
-    columnDefs = list(list(
-      visible = FALSE, targets = c(0)
-    )), 
-    fnDrawCallback = htmlwidgets::JS(
-      "function() { HTMLWidgets.staticRender(); }"
-    )
-  )
-  ) %>%
-  formatRound('Latest Value (Bps)', 2) %>% 
-  formatRound(ism, digits = 0) %>% 
-  formatStyle('1-Day Change (Bps)',
-              color = styleInterval(0, c(
-                app_config$boe_palette[2],
-                app_config$boe_palette[5]
-              )),) %>%
-  formatStyle('1-Week Change (Bps)',
-              color = styleInterval(0, c(
-                app_config$boe_palette[2],
-                app_config$boe_palette[5]
-              )),) %>%
-  formatStyle('YTD Change (Bps)',
-              color = styleInterval(0, c(
-                app_config$boe_palette[2],
-                app_config$boe_palette[5]
-              ))) %>%
-  formatStyle(0, target = 'row', lineHeight = '75%') %>%
-  formatRound(
-    c(
-      '1-Day Change (Bps)',
-      '1-Week Change (Bps)',
-      '30-Day Change (Bps)',
-      'YTD Change (Bps)', 
-      'CARRY VOL ADJ', 
-      'CARRY_1Y', 
-      "DURATION"
-    ),
-    1
-  ) %>%
-  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
-  formatStyle('CARRY_1Y',
-              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
-  ) %>%
-  formatStyle('P&L ($s)',
-              background = styleColorBar(df$`P&L ($s)`, 'lightblue'),
-              backgroundSize = '95% 30%',
-              backgroundRepeat = 'no-repeat',
-              backgroundPosition = 'left')  %>%
-  formatStyle('PV01 ($s)',
-              background = styleColorBar(df$`PV01 ($s)`, 'lightblue'),
-              backgroundSize = '95% 30%',
-              backgroundRepeat = 'no-repeat',
-              backgroundPosition = 'left') %>%
-  formatStyle('12M_PnL',
-              background = styleColorBar(df$`12M_PnL`, "#CAC0B6"),
-              backgroundSize = '95% 30%',
-              backgroundRepeat = 'no-repeat',
-              backgroundPosition = 'left') %>%
-  # formatStyle('PnL_Maturity',
-  #             background = styleColorBar(df$`PnL_Maturity`, "#CAC0B6"),
-  #             backgroundSize = '95% 30%',
-  #             backgroundRepeat = 'no-repeat',
-  #             backgroundPosition = 'left') %>%
-  sparkline:: spk_add_deps() 
 
 
 

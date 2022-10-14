@@ -50,7 +50,7 @@ boeCheckpoint(checkpoint_date, scanForPackages = FALSE)
 
 # load packages -----------------------------------------------------
 
-library(data.table)
+# library(data.table)
 library(DT)
 library(lubridate)
 library(tidyverse)
@@ -113,7 +113,7 @@ bond_lists <- config$BOND_LISTS[!is.na(config$BOND_LISTS)]
 # source modules for report ----------------------------------------------
 source("../modules/GET_DATA.R")
 source("../modules/CARRY_ROLL.R")
-
+source("../modules/PORTFOLIO_POSITIONS.R")
 ```
 
 <script>
@@ -202,6 +202,11 @@ plot_yield_curve(
 )
 
 ```
+
+Row {data-height= 600}
+-------------------------------------
+
+
 
 Canada C/R {data-icon="ion-android-refresh"}
 =====================================  
@@ -391,7 +396,7 @@ plot_yield_curve(
 )
 ```
 
-Row {data-height=1200}
+Row {data-height=1000}
 -------------------------------------
 
 ### US SSA Asset Swap Curves (SOFR)
@@ -404,7 +409,7 @@ data <-
   dplyr:: filter(CRNCY == "USD", 
                  YLD_YTM_MID > 0,
                  MATURITY < Sys.Date() + 12 * 365, 
-                 !TICKER %in% c("T", "B", "CMB")) %>% 
+                 !TICKER %in% c("T", "B", "CMB", "RFTB")) %>% 
   tidyr::drop_na(ASSET_SWAP_SPD_MID)
 
 plot_data <- get_govie_data(data = government_bonds, CURRENCY = "USD", grouping = "TICKER") %>% 
@@ -1245,6 +1250,123 @@ create_data_table(
               backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
   ) %>%
   formatStyle("CARRY_ROLL_12M", color = styleInterval(0, c("red", "green"))) 
+
+```
+
+
+
+
+RM View {data-icon="fa-binoculars"} 
+=====================================  
+
+Row {data-height= 1600}
+-------------------------------------
+
+```{r RM_VIEW, out.width= "100%", out.height= "100%"}
+
+df <- dplyr::filter(portfolio_table) %>%
+  dplyr::mutate(PF = Portfolio, 
+                Level1 = if_else(Level1 %in% c("Relative Value"), "RV", Level1), 
+                Level1 = if_else(Level1 %in% c("Swap Spread"), "Swaps", Level1), 
+                `CARRY VOL ADJ` = CARRY_VOL_ADJ, 
+                DUR = DUR_ADJ_MID) %>% 
+  dplyr::select(
+    Portfolio,
+    PF, 
+    Level1,
+    Strategy,
+    CIX,
+    contains("Value"),
+    contains("Change"),
+    Stdev,
+    DUR,
+    CARRY_1Y,
+    `CARRY VOL ADJ`,
+    `12M_PnL`,
+    `P&L ($s)`,
+    `PV01 ($s)`,
+    Timeseries,
+    `Box plot`
+  ) %>%
+  dplyr::arrange(Portfolio, Level1)
+
+ism <- df %>% lapply(class) %>% unlist == "numeric"
+
+DT::datatable(
+  df, 
+  extensions = c("RowGroup", "Buttons", "Scroller"),
+  filter = "top",
+  rownames = FALSE,
+  escape = FALSE,
+  selection = "none",
+  options = list(
+    scrollX = T, 
+    scrollY = T,#"1200px", 
+    dom = 't',
+    ordering = TRUE,
+    dom = "",
+    paging = FALSE,
+    rowGroup = 'Portfolio',
+    columnDefs = list(list(
+      visible = FALSE, targets = c(0)
+    )), 
+    fnDrawCallback = htmlwidgets::JS(
+      "function() { HTMLWidgets.staticRender(); }"
+    )
+  )
+  ) %>%
+  formatRound('Latest Value (Bps)', 2) %>% 
+  formatRound(ism, digits = 0) %>% 
+  formatStyle('1-Day Change (Bps)',
+              color = styleInterval(0, c(
+                app_config$boe_palette[2],
+                app_config$boe_palette[5]
+              )),) %>%
+  formatStyle('1-Week Change (Bps)',
+              color = styleInterval(0, c(
+                app_config$boe_palette[2],
+                app_config$boe_palette[5]
+              )),) %>%
+  formatStyle('YTD Change (Bps)',
+              color = styleInterval(0, c(
+                app_config$boe_palette[2],
+                app_config$boe_palette[5]
+              ))) %>%
+  formatStyle(0, target = 'row', lineHeight = '75%') %>%
+  formatRound(
+    c(
+      '1-Day Change (Bps)',
+      '1-Week Change (Bps)',
+      '30-Day Change (Bps)',
+      'YTD Change (Bps)', 
+      'CARRY VOL ADJ', 
+      'CARRY_1Y', 
+      "DUR"
+    ),
+    1
+  ) %>%
+  formatStyle(ism, color = styleInterval(0, c("red", "black"))) %>%
+  formatStyle('CARRY_1Y',
+              backgroundColor = styleInterval(0, c('lightpink', 'lightgreen'))
+  ) %>%
+  formatStyle('P&L ($s)',
+              background = styleColorBar(df$`P&L ($s)`, 'lightblue'),
+              backgroundSize = '95% 30%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'left')  %>%
+  formatStyle('PV01 ($s)',
+              background = styleColorBar(df$`PV01 ($s)`, 'lightblue'),
+              backgroundSize = '95% 30%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'left') %>%
+  formatStyle('12M_PnL',
+              background = styleColorBar(df$`12M_PnL`, "#CAC0B6"),
+              backgroundSize = '95% 30%',
+              backgroundRepeat = 'no-repeat',
+              backgroundPosition = 'left') %>%
+  sparkline:: spk_add_deps() 
+
+
 
 ```
 
